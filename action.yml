@@ -1,0 +1,51 @@
+name: 'Tailcall Launchpad Deploy'
+description: 'Use the Tailcall Launchpad service to deploy a Tailcall GraphQL configuration on the cloud'
+branding:
+  icon: 'terminal'
+  color: 'black'
+
+inputs:
+  LAUNCHPAD_URL:
+    description: 'The Tailcall Launchpad URL'
+    required: true
+
+outputs:
+  DEPLOY_URL:
+    description: 'The configuration deployment URL'
+    value: ${{ steps.parse-step.outputs.DEPLOY_URL }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+    - name: Install grpcurl
+      shell: bash
+      run: |
+        curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_x86_64.tar.gz" \
+        | sudo tar -xz -C /usr/local/bin
+    - name: Create payload
+      id: payload-step
+      shell: bash
+      env:
+        PAYLOAD: '{"username": "${{ github.actor }}", "repository": "${{ github.event.repository.name }}", "branch": "${{ github.ref_name }}"}'
+      run: echo $PAYLOAD && echo payload=$PAYLOAD >> $GITHUB_OUTPUT
+    - name: Deploy
+      id: deploy-step
+      shell: bash
+      env:
+        PAYLOAD: ${{ steps.payload-step.outputs.payload }}
+      run: |
+        tmpfile=$(mktemp) \
+        && grpcurl -d "$PAYLOAD" ${{ inputs.LAUNCHPAD_URL }} tailcall.GithubService/Deploy \
+        | tee "$tmpfile" \
+        && wait $! \
+        && output=$(cat "$tmpfile") \
+        && echo result=$output >> $GITHUB_OUTPUT
+    - name: Parse URL
+      id: parse-step
+      shell: bash
+      env:
+        RESULT: ${{ steps.deploy-step.outputs.result }}
+      run: |
+        url=$(echo "$RESULT" | grep -o '"Deployed url: .*"' | sed 's/"Deployed url: //' | tr -d '"') \
+        && echo DEPLOY_URL=$url >> $GITHUB_OUTPUT
